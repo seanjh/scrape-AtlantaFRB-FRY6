@@ -1,0 +1,3 @@
+[submodule "externals/fileDownloader"]
+	path = externals/fileDownloader
+	url = https://github.com/bantonj/fileDownloader/

@@ -1,0 +1,5 @@
+scrape-AtlantaFRB-Y6.py
+
+A specialized web-scraper that pulls all FR Y-6 documents from the Atlanta Federal Reserve (frbatlanta.org). The scraper should retreive all documents available each day, but should only download new files. The scraper maintains a masterlist.txt file to track the full universe of documents discovered during all runs and prevent duplicate downloads. Log files covering new filenames discovered each day are also saved (/logs). 
+
+The actual documents (FR Y-6 filings) are downloaded to the /docs folder, below the directory where the scraper is executed.
