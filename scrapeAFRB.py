@@ -1,10 +1,14 @@
-# scrapeAFRB.py
+''' scrapeAFRB.py
+	by Sean Herman
+	download_one inspired by PabloG @ http://stackoverflow.com/revisions/22776/3
+'''
 
 import urllib, urllib2, json
 import string
 import os, sys, argparse
 from datetime import date
-import fileDownloader
+from time import sleep
+#import fileDownloader
 
 head = {"Host":"www.frbatlanta.org",
 		"User-Agent":"Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/28.0.1500.20 Safari/537.36",
@@ -13,28 +17,25 @@ reqUrl = 'http://www.frbatlanta.org/banking/reporting/fry6/reader.cfm'
 docUrlPrefix = 'https://www.frbatlanta.org/banking/reporting/fry6/docs/'
 masterFile = 'masterlist.txt'
 logFile = 'scrapelog_' + str(date.today()) + '.txt'
-
+defaultDir = os.path.join(os.path.expanduser('~'),'Downloads','scrapeAFRB')
+errorFile = 'errorlog_' + str(date.today()) + '.txt'
 
 def get_args():
-	parser = argparse.ArgumentParser(description='Hello, world')
+	parser = argparse.ArgumentParser(description='Specializedfrbatlanta.org FR Y-6 document scraper')
 
-	parser.add_argument('-o',default=os.getcwd(), 
-						#metavar='output path (absolute)',
+	parser.add_argument('-o',default=defaultDir,
 						dest='workDir',
-						help='Sets a custom output directory.\n\
-							An asbolute path is required.\n')
+						help='Sets a custom output directory. An asbolute path is required.\n\
+							 Default output path is \'atlantaFRB\', below user\'s home directory.\n')
 	parser.add_argument('--max',default=None,
-						#metavar='maximum file downloads',
 						dest='maxFiles',
 						type=int,
 						help='Limits the number of files downloaded \
 						during the session.\n')
 
-	parser.add_argument('-v',#default=False,
-						#metavar='verbose mode',
+	parser.add_argument('-v',
 						dest='verbose',
 						action='store_true',
-						#type=bool,
 						help='Enables verbose mode. With verbose enabled, each \n\
 							file downloaded will be displayed in the console.\n')
 
@@ -79,7 +80,6 @@ def get_all_data(yList):
 	return d
 
 def unpack_year_data(jData):
-	# RSSDs = [ int(item[1]) for item in jData['DATA'] ]
 	yearData = []
 	# builds new list of dictionaries
 	# each list item pairs the appropriate COLUMNS heading with its DATA
@@ -123,20 +123,15 @@ def get_changes(data, pathList):
 	return newFiles
 
 def output_data(data, pathList, maxFiles, verbose):
-	# reconstruct output path string
+	# reconstruct output path strings
 	pathStr = os.path.join(*pathList)
+	logPath = os.path.join(pathStr,'logs')
+	docPath = os.path.join(pathStr, 'docs')
 
 	# open files
 	masterOut = open(os.path.join(pathStr,masterFile), 'a')
-	logPath = os.path.join(pathStr,'logs')
-	# make logs directory, if it does not exist
-	if not os.path.exists(logPath):
-		os.makedirs(logPath)
 	logOut = open(os.path.join(logPath,logFile), 'w')
-	
-	docPath = os.path.join(pathStr, 'docs')
-	if not os.path.exists(docPath):
-		os.makedirs(docPath)
+	errorOut = open(os.path.join(logPath,errorFile), 'w')
 
 	# when maxFiles is None, update value to full length of data list
 	if maxFiles == None:
@@ -144,29 +139,49 @@ def output_data(data, pathList, maxFiles, verbose):
 	
 	# write to files
 	for i in range(maxFiles):
-		masterOut.write('\n' + data[i])
-		logOut.write('\n' + data[i])
-		if verbose:
-			print '# %d/%d' % (i+1, maxFiles),
-		download_one(data[i], docPath, verbose)
-		# do download
-	#if confirm[0].upper() == 'Y':
-	#	download_files(data, dir)
+		#if verbose:
+			#print ' %d/%d' % (i+1, maxFiles),
+			#sys.stdout.write('%d/%d' % (i+1,maxFiles)),
+		download_one(data[i], docPath, verbose, masterOut, logOut, errorOut)
 
 	# close files
 	masterOut.close()
 	logOut.close()
-	if verbose:
-		print "%d total files downloaded to %s" % (maxFiles, docPath)
+	errorOut.close()
+	# fin.
 
-def download_one(file, docPath, verbose):
-	thisUrl = docUrlPrefix + '/' + urllib.quote(file)
+def download_one(file, docPath, verbose, masterOut, logOut, errorOut):
+	# compose full url and file path
+	thisUrl = docUrlPrefix + urllib.quote(file)
 	thisFile = os.path.join(docPath, file)
-	downloader = fileDownloader.DownloadFile(thisUrl, thisFile)
-	if verbose:
-		print 'Downloading: %s ...' % (file),
-	downloader.download()
-	print "Done."
+
+	# open download file, prepare download handlers
+	downFile = open(thisFile, 'wb')
+	block, fileSize = 8192, 0 # 8KB blocks
+
+	try:
+		u = urllib2.urlopen(thisUrl)
+		metadata = u.info()
+		urlSize = int(metadata['content-length'])
+		while True:
+			dataBuffer = u.read(block)
+			if not dataBuffer:
+				break
+			downFile.write(dataBuffer)
+			fileSize = fileSize + len(dataBuffer)
+			if verbose:
+				sys.stdout.write('\r %s: %d/%d KB (%0.0f%%) ... ' % (file, fileSize, urlSize, fileSize * 100. / urlSize) ),
+		u.close()
+		sys.stdout.write('Done\n')
+		masterOut.write('\n' + file)
+		logOut.write('\n' + file)
+	except:
+			if verbose:
+				sys.stdout.write('Download failed!\n')
+			errorOut.write('\n' + file)
+	downFile.close()
+
+	
 
 def deconstruct_path(pathStr):
 	'''Transforms a path string into a list of directory strings, in order.
@@ -181,15 +196,30 @@ def deconstruct_path(pathStr):
 	pathList.reverse()
 	return pathList
 
-def main():
-	workDir, maxFiles, verbose = get_args()
-	#workDir = os.getcwd() + '\\sjh\\frbatlanta\\'
-	#workDir = 'C:\\Python27\\sjh\\frbatlanta\\'
+def check_path(pathList):
+	# check required paths
+	basePath = os.path.join(*pathList)
+	docPath = os.path.join(basePath, 'docs')
+	logPath = os.path.join(basePath, 'logs')
+	if not os.path.exists(basePath):
+		os.makedirs(basePath)
+	if not os.path.exists(docPath):
+		os.makedirs(docPath)
+	if not os.path.exists(logPath):
+		os.makedirs(logPath)
 
+def main():
+	# parse arguments from command line
+	workDir, maxFiles, verbose = get_args()
+
+	# check for required directories below workDir
+	check_path(workDir)
+
+	# scrape data from frbatlanta.org
 	years = get_years()
 	data = get_all_data(years)
 	
-	# list of new FILENAME values
+	# list of new FILENAME values from scrape
 	newData = get_changes(data, workDir)
 	# update master list, write logs, download files
 	output_data(newData, workDir, maxFiles, verbose)
